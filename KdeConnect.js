@@ -76,6 +76,10 @@ KdeConnectServerListener = function( socket ) {
                     console.log("Recipient not found")
                     return
                 }
+                if (!this.id) {
+                    console.log("Who are you?")
+                    return
+                }
                 recipient.send(msg.data)
                 break
             default:
