@@ -1,6 +1,6 @@
 var StringDecoder = require('string_decoder').StringDecoder
-
 var utf8_decoder = new StringDecoder('utf-8')
+var _ = require('underscore')
 
 function Device (data) {
     data = data || {}
@@ -18,7 +18,7 @@ function CloudNetworkMessage ( data ) {
     var data = data || {}
 
     this.recipient = data.recipient || false
-    this.data      = data.data || false
+    this.data      = data.data || ""
     this.action    = data.action || false
     this.token     = data.token || false
 }
@@ -32,28 +32,7 @@ CloudNetworkMessage.prototype.serialize = function () {
     return JSON.stringify(this)
 }
 
-DeviceArray = function(){}
-DeviceArray.prototype = new Array
-DeviceArray.prototype.getIndex = function( test ) {
-    for (var i = 0; i < this.length; i++) {
-        if (test(this[i]))
-            return i
-    }
-    return undefined
-}
-
-DeviceArray.prototype.find = function( device_id ) {
-    var idx = this.getIndex(function( device ){
-        return device.id == device_id
-    })
-
-    if (idx == undefined)
-        return undefined
-    else
-        return this[idx]
-}
-
-var devices = new DeviceArray()
+var devices = []
 
 KdeConnectServerListener = function( socket ) {
     var device = new Device({"socket": socket})
@@ -71,7 +50,10 @@ KdeConnectServerListener = function( socket ) {
                 this.id = msg.token
                 break
             case "data":
-                var recipient = devices.find(msg.recipient)
+                var recipient = _.find(devices, function(device) {
+                    return device.id == msg.recipient
+                })
+
                 if (!recipient) {
                     console.log("Recipient not found")
                     return
@@ -90,10 +72,10 @@ KdeConnectServerListener = function( socket ) {
     }.bind(device)) //bind 'device' into 'this' for future accessing
 
     socket.on('end', function() {
-        var idx = devices.getIndex(function(device) {
+        var device = _.find(devices, function(device) {
             return device.socket == socket
         })
-        devices.splice(idx, 1)
+        devices = _.without(devices, device)
         socket.destroy()
     }.bind(device))
 
@@ -109,7 +91,6 @@ KdeConnectServerListener = function( socket ) {
 module.exports = {
     'Device': Device,
     'CloudNetworkMessage': CloudNetworkMessage,
-    'DeviceArray': DeviceArray,
     'SocketServer': KdeConnectServerListener,
     'devices': devices
 }
