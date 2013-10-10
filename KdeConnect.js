@@ -14,6 +14,13 @@ Device.prototype.send = function( msg ) {
     this.socket.write(msg)
 }
 
+Device.prototype.error = function( error ) {
+    this.send(JSON.stringify({
+        "success": false,
+        "message": error
+    }))
+}
+
 function CloudNetworkMessage ( data ) {
     var data = data || {}
 
@@ -34,55 +41,59 @@ CloudNetworkMessage.prototype.serialize = function () {
 
 var devices = []
 
-KdeConnectServerListener = function( socket ) {
-    var device = new Device({"socket": socket})
-    devices.push(device)
-    socket.on('data', function(data) {
-        var msg
-        try {
-            msg = CloudNetworkMessage.deserialize(data)
-        } catch (e) {
-            console.log("Invalid message")
-            return
-        }
-        switch(msg.action) {
-            case "ping":
-                this.id = msg.token
-                break
-            case "data":
-                var recipient = _.find(devices, function(device) {
-                    return device.id == msg.recipient
-                })
+var onDataListener = function(data) {
+    var msg = CloudNetworkMessage.deserialize(data)
+    switch(msg.action) {
+        case "ping":
+            this.id = msg.token
+            break
+        case "data":
+            var recipient = _.find(devices, function(device) {
+                return device.id == msg.recipient
+            })
 
-                if (!recipient) {
-                    console.log("Recipient not found")
-                    return
-                }
-                if (!this.id) {
-                    console.log("Who are you?")
-                    return
-                }
-                recipient.send(msg.data)
-                break
-            default:
-                console.log("Unrecognized action")
-                return
+            if (!recipient)
+                throw new Error("Recipient not found:", msg.recipient)
 
-        }
-    }.bind(device)) //bind 'device' into 'this' for future accessing
+            if (!this.id)
+                throw new Error("Who are you?")
 
-    socket.on('end', function() {
+            recipient.send(msg.data)
+            break
+        default:
+            throw new Error("Unrecognized action", msg.action)
+    }
+}
+
+var onEndListener = function(socket) {
+    return function() {
         var device = _.find(devices, function(device) {
             return device.socket == socket
         })
         devices = _.without(devices, device)
         socket.destroy()
-    }.bind(device))
+        console.log("Client", device.id, "disconnected")
+    }
+}
+
+
+KdeConnectServerListener = function( socket ) {
+    var device = new Device({"socket": socket})
+    devices.push(device)
+    socket.on('data', function( data ) {
+        try {
+            onDataListener(data).bind(device)
+        } catch (error) {
+            // Send device an error message
+            device.error(error.message)
+        }
+    })
+    socket.on('end', onEndListener(socket).bind(device))
 
     setTimeout(function() {
         // Set an AUTH timeout of 120s
         if (device.id == undefined) {
-            device.send("Byez!")
+            device.error("Closing connection, not a valid token")
             socket.emit('end')
         }
     }, 1000 * 120)
