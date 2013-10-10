@@ -2,6 +2,8 @@
   "name": "kdeconnect-server",
   "version": "0.0.1",
   "dependencies": {
-      "underscore": "*"
+      "underscore": "1.5.x",
+      "express": "3.x"
   }
 }
+

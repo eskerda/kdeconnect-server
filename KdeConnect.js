@@ -1,6 +1,8 @@
 var StringDecoder = require('string_decoder').StringDecoder
 var utf8_decoder = new StringDecoder('utf-8')
 var _ = require('underscore')
+var express = require('express')
+var crypto = require('crypto')
 
 function Device (data) {
     data = data || {}
@@ -40,12 +42,21 @@ CloudNetworkMessage.prototype.serialize = function () {
 }
 
 var devices = []
+var auth    = {}
 
-var onDataListener = function(data) {
+var onDataListener = function(data, device) {
     var msg = CloudNetworkMessage.deserialize(data)
     switch(msg.action) {
         case "ping":
-            this.id = msg.token
+            var authRecord = auth[msg.token]
+            if (!authRecord)
+                throw new Error("Invalid token")
+            device.id = authRecord.id
+            device.user = authRecord.user
+            device.send(JSON.stringify({
+                success: true,
+                message: "Hello, " + device.id
+            }))
             break
         case "data":
             var recipient = _.find(devices, function(device) {
@@ -55,7 +66,7 @@ var onDataListener = function(data) {
             if (!recipient)
                 throw new Error("Recipient not found:", msg.recipient)
 
-            if (!this.id)
+            if (!device.id)
                 throw new Error("Who are you?")
 
             recipient.send(msg.data)
@@ -82,8 +93,9 @@ KdeConnectServerListener = function( socket ) {
     devices.push(device)
     socket.on('data', function( data ) {
         try {
-            onDataListener(data).bind(device)
+            onDataListener(data, device)
         } catch (error) {
+            //console.log(error.stack)
             // Send device an error message
             device.error(error.message)
         }
@@ -99,10 +111,56 @@ KdeConnectServerListener = function( socket ) {
     }, 1000 * 120)
 }
 
+var AuthServer = express()
+
+AuthServer.use(express.bodyParser())
+
+AuthServer.post('/auth', function(req, res, next) {
+    var user   = req.body.user
+    var passwd = req.body.password
+    var device = req.body.device
+
+    if (!user || !passwd || !device) {
+        return next(new Error('Fields missing'))
+    }
+
+    var token = crypto.createHash('md5').update(device).digest('hex')
+
+    auth[token] = {
+        "id": device,
+        "user": user
+    }
+
+    res.json({
+        "success": true,
+        "token": token
+    })
+})
+
+AuthServer.get('/devices/:token', function(req, res, next) {
+    var token = req.params.token
+    var authRecord = auth[token]
+    if (!authRecord) {
+        return next(new Error('Not authed'))
+    }
+    var user_devices = _.where(devices, {
+        user: authRecord.user
+    })
+    var response = _.map(user_devices, function(device) {
+        return _.pick(device, 'id', 'name')
+    })
+    res.json(response)
+})
+
+AuthServer.use(function(err, req, res, next) {
+    res.send(500, err.message)
+})
+
 module.exports = {
     'Device': Device,
     'CloudNetworkMessage': CloudNetworkMessage,
     'SocketServer': KdeConnectServerListener,
+    'AuthServer': AuthServer,
     'devices': devices
 }
 
